@@ -21,9 +21,10 @@ wp-config-sample.php
 wp-content/uploads/
 
 # =========================
-# Third-party Themes (all of them - no custom theme)
+# Third-party Themes (ignore all, then allow hello-elementor)
 # =========================
-wp-content/themes/
+wp-content/themes/*
+!wp-content/themes/hello-elementor/
 
 # =========================
 # Third-party Plugins
@@ -37,7 +38,6 @@ wp-content/plugins/dynamic-content-for-elementor/
 wp-content/plugins/elementor/
 wp-content/plugins/elementor-pro/
 wp-content/plugins/google-site-kit/
-wp-content/plugins/jwt-authentication-for-wp-rest-api/
 wp-content/plugins/meta-box/
 wp-content/plugins/mobile-menu/
 wp-content/plugins/ninja-forms/
@@ -46,7 +46,6 @@ wp-content/plugins/official-mailerlite-sign-up-forms/
 wp-content/plugins/pdf-viewer-for-wordpress/
 wp-content/plugins/seo-by-rank-math/
 wp-content/plugins/wordpress-importer/
-wp-content/plugins/wp-rest-api-authentication/
 wp-content/plugins/index.php
 
 # =========================
