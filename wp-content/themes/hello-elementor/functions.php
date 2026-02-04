@@ -13,11 +13,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 define( 'HELLO_ELEMENTOR_VERSION', '3.3.0' );
 
-// TEST DEPLOY - REMOVE ME
-add_action( 'wp_body_open', function() {
-	echo '<div style="background:#ff0;color:#000;text-align:center;padding:10px;font-weight:bold;z-index:99999;position:relative;">DEPLOY TEST - If you see this, GitHub deploy works!</div>';
-});
-
 
 if ( ! isset( $content_width ) ) {
 	$content_width = 800; // Pixels.
