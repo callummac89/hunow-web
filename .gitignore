@@ -1,0 +1,80 @@
+# =========================
+# WordPress Core
+# =========================
+/wp-admin/
+/wp-includes/
+/wp-*.php
+!/wp-content/
+license.txt
+readme.html
+xmlrpc.php
+
+# =========================
+# WordPress Config (contains credentials)
+# =========================
+wp-config.php
+wp-config-sample.php
+
+# =========================
+# Uploads (media, generated caches)
+# =========================
+wp-content/uploads/
+
+# =========================
+# Third-party Themes (all of them - no custom theme)
+# =========================
+wp-content/themes/
+
+# =========================
+# Third-party Plugins
+# =========================
+wp-content/plugins/advanced-custom-fields-pro/
+wp-content/plugins/anywhere-elementor-pro/
+wp-content/plugins/duplicate-page/
+wp-content/plugins/duplicator/
+wp-content/plugins/duracelltomi-google-tag-manager/
+wp-content/plugins/dynamic-content-for-elementor/
+wp-content/plugins/elementor/
+wp-content/plugins/elementor-pro/
+wp-content/plugins/google-site-kit/
+wp-content/plugins/jwt-authentication-for-wp-rest-api/
+wp-content/plugins/meta-box/
+wp-content/plugins/mobile-menu/
+wp-content/plugins/ninja-forms/
+wp-content/plugins/ninja-forms-*/
+wp-content/plugins/official-mailerlite-sign-up-forms/
+wp-content/plugins/pdf-viewer-for-wordpress/
+wp-content/plugins/seo-by-rank-math/
+wp-content/plugins/wordpress-importer/
+wp-content/plugins/wp-rest-api-authentication/
+wp-content/plugins/index.php
+
+# =========================
+# Sensitive / Data files
+# =========================
+signups.txt
+.env
+.env.*
+
+# =========================
+# IDE & OS
+# =========================
+.vscode/
+.cursor/
+.DS_Store
+Thumbs.db
+*.log
+node_modules/
+
+# =========================
+# Misc
+# =========================
+.well-known/
+1f1cddde70376d65f117107d281e9246.txt
+
+# WP content misc
+wp-content/backups-dup-lite/
+wp-content/index.php
+
+# WP core entry point (keep index.html as main)
+index.php
