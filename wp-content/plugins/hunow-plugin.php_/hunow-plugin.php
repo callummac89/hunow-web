@@ -1186,6 +1186,13 @@ class HUNOW_Statistics {
             'permission_callback' => array($this, 'verify_jwt_token')
         ));
 
+        // Daily login check-in endpoint
+        register_rest_route('hunow/v1', '/daily-checkin', array(
+            'methods' => 'POST',
+            'callback' => array($this, 'daily_checkin'),
+            'permission_callback' => array($this, 'verify_jwt_token')
+        ));
+
         // Register custom REST fields for featured images
         $this->register_featured_image_fields();
     }
@@ -2863,7 +2870,11 @@ class HUNOW_Statistics {
                     
                     // Send push notification to venue owner
                     $this->send_redemption_notification($venue_id, $selected_offer, $user_id);
-                    
+
+                    // Award points for offer redemption (25pts) and QR scan (10pts)
+                    $this->award_points($user_id, 25, 'offer_redeemed', 'Redeemed offer: ' . $selected_offer);
+                    $this->award_points($user_id, 10, 'qr_scan', 'QR code scanned at ' . $venue_name);
+
                     $message = "✓ Offer '{$selected_offer}' redeemed successfully at {$venue_name}!";
                 } else {
                     // Password verified, but no offer selected yet - check offers and show selection
@@ -2891,7 +2902,10 @@ class HUNOW_Statistics {
                         $total_scans = get_user_meta($user_id, 'membership_card_scans', true);
                         $total_scans = $total_scans ? intval($total_scans) + 1 : 1;
                         update_user_meta($user_id, 'membership_card_scans', $total_scans);
-                        
+
+                        // Award points for QR scan verification
+                        $this->award_points($user_id, 10, 'qr_scan', 'QR code scanned at ' . $venue_name);
+
                         $message = "✓ Offer redeemed successfully at {$venue_name}!";
                     } else {
                         // Store venue info in transient for next step (offer selection)
@@ -4099,6 +4113,27 @@ class HUNOW_Statistics {
             $new_badges[] = array('name' => 'Critic', 'icon' => '⭐', 'description' => 'Rated 5 listings', 'date' => current_time('mysql'));
         }
 
+        // QR scan badges
+        $total_scans = intval(get_user_meta($user_id, 'membership_card_scans', true));
+        if ($total_scans >= 1 && !in_array('First Scan', $existing_names)) {
+            $new_badges[] = array('name' => 'First Scan', 'icon' => '📱', 'description' => 'First QR code scan', 'date' => current_time('mysql'));
+        }
+        if ($total_scans >= 10 && !in_array('Regular', $existing_names)) {
+            $new_badges[] = array('name' => 'Regular', 'icon' => '🔄', 'description' => '10 QR code scans', 'date' => current_time('mysql'));
+        }
+        if ($total_scans >= 50 && !in_array('VIP Member', $existing_names)) {
+            $new_badges[] = array('name' => 'VIP Member', 'icon' => '🎖️', 'description' => '50 QR code scans', 'date' => current_time('mysql'));
+        }
+
+        // Login streak badges
+        $streak = intval(get_user_meta($user_id, 'hunow_login_streak', true));
+        if ($streak >= 7 && !in_array('Dedicated', $existing_names)) {
+            $new_badges[] = array('name' => 'Dedicated', 'icon' => '🔥', 'description' => '7-day login streak', 'date' => current_time('mysql'));
+        }
+        if ($streak >= 30 && !in_array('Committed', $existing_names)) {
+            $new_badges[] = array('name' => 'Committed', 'icon' => '💪', 'description' => '30-day login streak', 'date' => current_time('mysql'));
+        }
+
         if (!empty($new_badges)) {
             $badges = array_merge($badges, $new_badges);
             update_user_meta($user_id, 'hunow_badges', $badges);
@@ -4119,8 +4154,65 @@ class HUNOW_Statistics {
      */
     public function award_comment_points($comment_id, $comment) {
         if (is_object($comment) && $comment->user_id > 0 && $comment->comment_approved != 'spam') {
-            $this->award_points($comment->user_id, 10, 'comment', 'Left a review');
+            $this->award_points($comment->user_id, 5, 'comment', 'Left a review');
         }
+    }
+
+    /**
+     * Daily check-in - award 1 point per day
+     * Endpoint: POST /wp-json/hunow/v1/daily-checkin
+     */
+    public function daily_checkin($request) {
+        $current_user_id = get_current_user_id();
+
+        if (!$current_user_id) {
+            return new WP_Error('unauthorized', 'User must be logged in', array('status' => 401));
+        }
+
+        $today = current_time('Y-m-d');
+        $last_checkin = get_user_meta($current_user_id, 'hunow_last_daily_checkin', true);
+
+        if ($last_checkin === $today) {
+            // Already checked in today
+            $streak = intval(get_user_meta($current_user_id, 'hunow_login_streak', true));
+            return new WP_REST_Response(array(
+                'success' => true,
+                'already_checked_in' => true,
+                'streak' => $streak,
+                'message' => 'Already checked in today',
+            ), 200);
+        }
+
+        // Calculate streak
+        $yesterday = date('Y-m-d', strtotime('-1 day', strtotime($today)));
+        $streak = intval(get_user_meta($current_user_id, 'hunow_login_streak', true));
+
+        if ($last_checkin === $yesterday) {
+            $streak += 1;
+        } else {
+            $streak = 1; // Reset streak
+        }
+
+        update_user_meta($current_user_id, 'hunow_last_daily_checkin', $today);
+        update_user_meta($current_user_id, 'hunow_login_streak', $streak);
+
+        // Award daily login point
+        $this->award_points($current_user_id, 1, 'daily_login', 'Daily login (day ' . $streak . ')');
+
+        // Bonus points for streaks
+        if ($streak === 7) {
+            $this->award_points($current_user_id, 5, 'streak_bonus', '7-day login streak bonus');
+        } elseif ($streak === 30) {
+            $this->award_points($current_user_id, 20, 'streak_bonus', '30-day login streak bonus');
+        }
+
+        return new WP_REST_Response(array(
+            'success' => true,
+            'already_checked_in' => false,
+            'streak' => $streak,
+            'points_awarded' => 1,
+            'message' => 'Daily check-in complete! Day ' . $streak,
+        ), 200);
     }
 
     /**
