@@ -75,6 +75,10 @@ class HUNOW_Statistics {
         add_action('admin_menu', array($this, 'add_push_notification_menu'));
         add_action('publish_event', array($this, 'send_new_event_notification'), 10, 2);
         add_action('hunow_rating_submitted', array($this, 'send_rating_notification'), 10, 3);
+
+        // Points system hooks - award points for ratings and comments
+        add_action('hunow_rating_submitted', array($this, 'award_rating_points'), 10, 3);
+        add_action('wp_insert_comment', array($this, 'award_comment_points'), 10, 2);
     }
     
     /**
@@ -1142,6 +1146,46 @@ class HUNOW_Statistics {
             }
         ));
         
+        // Favourites endpoints
+        register_rest_route('hunow/v1', '/favourites', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_favourites'),
+            'permission_callback' => array($this, 'verify_jwt_token')
+        ));
+
+        register_rest_route('hunow/v1', '/favourites', array(
+            'methods' => 'POST',
+            'callback' => array($this, 'add_favourite'),
+            'permission_callback' => array($this, 'verify_jwt_token')
+        ));
+
+        register_rest_route('hunow/v1', '/favourites/(?P<post_id>\d+)', array(
+            'methods' => 'DELETE',
+            'callback' => array($this, 'remove_favourite'),
+            'permission_callback' => array($this, 'verify_jwt_token')
+        ));
+
+        // Points endpoints
+        register_rest_route('hunow/v1', '/points', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_points'),
+            'permission_callback' => array($this, 'verify_jwt_token')
+        ));
+
+        // Badges endpoints
+        register_rest_route('hunow/v1', '/badges', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_badges'),
+            'permission_callback' => array($this, 'verify_jwt_token')
+        ));
+
+        // Leaderboard endpoint
+        register_rest_route('hunow/v1', '/leaderboard', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_leaderboard'),
+            'permission_callback' => array($this, 'verify_jwt_token')
+        ));
+
         // Register custom REST fields for featured images
         $this->register_featured_image_fields();
     }
@@ -3850,6 +3894,334 @@ class HUNOW_Statistics {
                 )
             );
         }
+    }
+
+    // =========================================================================
+    // FAVOURITES ENDPOINTS
+    // =========================================================================
+
+    /**
+     * Get user's favourites
+     * Endpoint: GET /wp-json/hunow/v1/favourites
+     */
+    public function get_favourites($request) {
+        $current_user_id = get_current_user_id();
+
+        if (!$current_user_id) {
+            return new WP_Error('unauthorized', 'User must be logged in', array('status' => 401));
+        }
+
+        $favourites = get_user_meta($current_user_id, 'hunow_favourites', true);
+        if (!is_array($favourites)) {
+            $favourites = array();
+        }
+
+        return new WP_REST_Response($favourites, 200);
+    }
+
+    /**
+     * Add a favourite
+     * Endpoint: POST /wp-json/hunow/v1/favourites
+     */
+    public function add_favourite($request) {
+        $current_user_id = get_current_user_id();
+
+        if (!$current_user_id) {
+            return new WP_Error('unauthorized', 'User must be logged in', array('status' => 401));
+        }
+
+        $post_id = intval($request->get_param('post_id'));
+        $content_type = sanitize_text_field($request->get_param('content_type'));
+
+        if (!$post_id) {
+            return new WP_Error('missing_post_id', 'Post ID is required', array('status' => 400));
+        }
+
+        // Verify post exists
+        $post = get_post($post_id);
+        if (!$post) {
+            return new WP_Error('post_not_found', 'Post not found', array('status' => 404));
+        }
+
+        // Use post's actual type if content_type not provided
+        if (empty($content_type)) {
+            $content_type = $post->post_type;
+        }
+
+        // Get existing favourites
+        $favourites = get_user_meta($current_user_id, 'hunow_favourites', true);
+        if (!is_array($favourites)) {
+            $favourites = array();
+        }
+
+        // Check if already favourited
+        foreach ($favourites as $fav) {
+            if (intval($fav['post_id']) === $post_id) {
+                return new WP_REST_Response(array(
+                    'success' => true,
+                    'message' => 'Already favourited',
+                    'data' => $fav,
+                ), 200);
+            }
+        }
+
+        // Add new favourite
+        $new_favourite = array(
+            'post_id' => $post_id,
+            'content_type' => $content_type,
+            'date_added' => current_time('mysql'),
+        );
+
+        $favourites[] = $new_favourite;
+        update_user_meta($current_user_id, 'hunow_favourites', $favourites);
+
+        // Award points for favouriting
+        $this->award_points($current_user_id, 2, 'favourite', 'Favourited a listing');
+
+        return new WP_REST_Response(array(
+            'success' => true,
+            'data' => $new_favourite,
+        ), 201);
+    }
+
+    /**
+     * Remove a favourite
+     * Endpoint: DELETE /wp-json/hunow/v1/favourites/{post_id}
+     */
+    public function remove_favourite($request) {
+        $current_user_id = get_current_user_id();
+
+        if (!$current_user_id) {
+            return new WP_Error('unauthorized', 'User must be logged in', array('status' => 401));
+        }
+
+        $post_id = intval($request['post_id']);
+
+        $favourites = get_user_meta($current_user_id, 'hunow_favourites', true);
+        if (!is_array($favourites)) {
+            $favourites = array();
+        }
+
+        $found = false;
+        $updated = array();
+        foreach ($favourites as $fav) {
+            if (intval($fav['post_id']) === $post_id) {
+                $found = true;
+            } else {
+                $updated[] = $fav;
+            }
+        }
+
+        if (!$found) {
+            return new WP_Error('not_found', 'Favourite not found', array('status' => 404));
+        }
+
+        update_user_meta($current_user_id, 'hunow_favourites', $updated);
+
+        return new WP_REST_Response(array(
+            'success' => true,
+            'message' => 'Favourite removed',
+        ), 200);
+    }
+
+    // =========================================================================
+    // POINTS & BADGES SYSTEM
+    // =========================================================================
+
+    /**
+     * Award points to a user
+     * Internal helper - not an endpoint
+     */
+    private function award_points($user_id, $points, $action, $description = '') {
+        $current_points = intval(get_user_meta($user_id, 'hunow_points', true));
+        $new_total = $current_points + $points;
+        update_user_meta($user_id, 'hunow_points', $new_total);
+
+        // Record in history
+        $history = get_user_meta($user_id, 'hunow_points_history', true);
+        if (!is_array($history)) {
+            $history = array();
+        }
+
+        $history[] = array(
+            'points' => $points,
+            'action' => $action,
+            'description' => $description,
+            'date' => current_time('mysql'),
+            'total_after' => $new_total,
+        );
+
+        update_user_meta($user_id, 'hunow_points_history', $history);
+
+        // Check for badge milestones
+        $this->check_badges($user_id, $new_total, $action);
+    }
+
+    /**
+     * Check and award badges based on milestones
+     */
+    private function check_badges($user_id, $total_points, $action) {
+        $badges = get_user_meta($user_id, 'hunow_badges', true);
+        if (!is_array($badges)) {
+            $badges = array();
+        }
+
+        $existing_names = array_column($badges, 'name');
+        $new_badges = array();
+
+        // Points milestones
+        if ($total_points >= 10 && !in_array('Early Explorer', $existing_names)) {
+            $new_badges[] = array('name' => 'Early Explorer', 'icon' => '🌟', 'description' => 'Earned 10 points', 'date' => current_time('mysql'));
+        }
+        if ($total_points >= 50 && !in_array('Hull Enthusiast', $existing_names)) {
+            $new_badges[] = array('name' => 'Hull Enthusiast', 'icon' => '🏆', 'description' => 'Earned 50 points', 'date' => current_time('mysql'));
+        }
+        if ($total_points >= 100 && !in_array('Local Legend', $existing_names)) {
+            $new_badges[] = array('name' => 'Local Legend', 'icon' => '👑', 'description' => 'Earned 100 points', 'date' => current_time('mysql'));
+        }
+        if ($total_points >= 250 && !in_array('Hull Champion', $existing_names)) {
+            $new_badges[] = array('name' => 'Hull Champion', 'icon' => '💎', 'description' => 'Earned 250 points', 'date' => current_time('mysql'));
+        }
+        if ($total_points >= 500 && !in_array('City Ambassador', $existing_names)) {
+            $new_badges[] = array('name' => 'City Ambassador', 'icon' => '🌆', 'description' => 'Earned 500 points', 'date' => current_time('mysql'));
+        }
+
+        // Action-based badges
+        $favourites = get_user_meta($user_id, 'hunow_favourites', true);
+        $fav_count = is_array($favourites) ? count($favourites) : 0;
+        if ($fav_count >= 5 && !in_array('Collector', $existing_names)) {
+            $new_badges[] = array('name' => 'Collector', 'icon' => '❤️', 'description' => 'Favourited 5 listings', 'date' => current_time('mysql'));
+        }
+
+        $user_ratings = get_user_meta($user_id, 'hunow_user_ratings', true);
+        $rating_count = is_array($user_ratings) ? count($user_ratings) : 0;
+        if ($rating_count >= 5 && !in_array('Critic', $existing_names)) {
+            $new_badges[] = array('name' => 'Critic', 'icon' => '⭐', 'description' => 'Rated 5 listings', 'date' => current_time('mysql'));
+        }
+
+        if (!empty($new_badges)) {
+            $badges = array_merge($badges, $new_badges);
+            update_user_meta($user_id, 'hunow_badges', $badges);
+        }
+    }
+
+    /**
+     * Award points when a user submits a rating
+     * Hooked via: hunow_rating_submitted
+     */
+    public function award_rating_points($post_id, $rating, $user_id) {
+        $this->award_points($user_id, 5, 'rating', 'Rated a listing');
+    }
+
+    /**
+     * Award points when a user submits a comment
+     * Hooked via: wp_insert_comment
+     */
+    public function award_comment_points($comment_id, $comment) {
+        if (is_object($comment) && $comment->user_id > 0 && $comment->comment_approved != 'spam') {
+            $this->award_points($comment->user_id, 10, 'comment', 'Left a review');
+        }
+    }
+
+    /**
+     * Get current user's points
+     * Endpoint: GET /wp-json/hunow/v1/points
+     */
+    public function get_points($request) {
+        $current_user_id = get_current_user_id();
+
+        if (!$current_user_id) {
+            return new WP_Error('unauthorized', 'User must be logged in', array('status' => 401));
+        }
+
+        $points = intval(get_user_meta($current_user_id, 'hunow_points', true));
+        $history = get_user_meta($current_user_id, 'hunow_points_history', true);
+        if (!is_array($history)) {
+            $history = array();
+        }
+
+        return new WP_REST_Response(array(
+            'success' => true,
+            'data' => array(
+                'points' => $points,
+                'history' => array_slice(array_reverse($history), 0, 50), // Last 50 entries
+            ),
+        ), 200);
+    }
+
+    /**
+     * Get user's badges
+     * Endpoint: GET /wp-json/hunow/v1/badges?user_id=X
+     */
+    public function get_badges($request) {
+        $user_id = intval($request->get_param('user_id'));
+
+        // If no user_id specified, use current user
+        if (!$user_id) {
+            $user_id = get_current_user_id();
+        }
+
+        if (!$user_id) {
+            return new WP_Error('unauthorized', 'User must be logged in', array('status' => 401));
+        }
+
+        $badges = get_user_meta($user_id, 'hunow_badges', true);
+        if (!is_array($badges)) {
+            $badges = array();
+        }
+
+        return new WP_REST_Response(array(
+            'success' => true,
+            'data' => array(
+                'badges' => $badges,
+            ),
+        ), 200);
+    }
+
+    /**
+     * Get leaderboard
+     * Endpoint: GET /wp-json/hunow/v1/leaderboard
+     */
+    public function get_leaderboard($request) {
+        // Get all users with points
+        $users = get_users(array(
+            'meta_key' => 'hunow_points',
+            'meta_value' => 0,
+            'meta_compare' => '>',
+            'meta_type' => 'NUMERIC',
+            'orderby' => 'meta_value_num',
+            'order' => 'DESC',
+            'number' => 50, // Top 50 users
+        ));
+
+        $leaderboard = array();
+
+        foreach ($users as $user) {
+            $points = intval(get_user_meta($user->ID, 'hunow_points', true));
+            $badges = get_user_meta($user->ID, 'hunow_badges', true);
+            if (!is_array($badges)) {
+                $badges = array();
+            }
+
+            $leaderboard[] = array(
+                'user_id' => $user->ID,
+                'username' => $user->display_name,
+                'points' => $points,
+                'badges' => $badges,
+            );
+        }
+
+        // Sort by points descending (redundant but ensures consistency)
+        usort($leaderboard, function($a, $b) {
+            return $b['points'] - $a['points'];
+        });
+
+        return new WP_REST_Response(array(
+            'success' => true,
+            'data' => array(
+                'leaderboard' => $leaderboard,
+            ),
+        ), 200);
     }
 }
 
